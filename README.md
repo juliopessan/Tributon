@@ -2,6 +2,14 @@
 
 [![CI](https://github.com/juliopessan/Tributon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juliopessan/Tributon/actions/workflows/ci.yml?query=branch%3Amain)
 
+<p align="center">
+  <a href="docs/media/tributon-teaser.mp4" title="Assistir ao teaser completo">
+    <img src="docs/media/tributon-teaser.gif" width="100%" alt="Teaser do Tributon: a NF-e volta com a rejeição 1024; 93% dos produtos têm inconsistência no cadastro; o Tributon classifica cada item e confere no motor oficial; o contador assina e o cliente recebe com a marca do escritório.">
+  </a>
+  <br>
+  <a href="docs/media/tributon-teaser.mp4"><b>▶ Assistir ao teaser completo</b></a> · 52 s, com som
+</p>
+
 **Cadastro errado vira nota rejeitada. Venda a correção com a sua marca.**
 
 Desde 3 de agosto de 2026, cada item da NF-e do regime normal precisa de CST e cClassTrib corretos para o IBS e a CBS.
