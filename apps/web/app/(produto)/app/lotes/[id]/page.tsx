@@ -7,8 +7,11 @@ import { sessaoOuLogin } from "@/lib/server-session";
 import { pct, ROTULO_REGIME, ROTULO_STATUS_LOTE } from "@/lib/rotulos";
 import { FilaRevisao, type ItemFila } from "@/components/fila-revisao";
 import { AcoesLote } from "@/components/acoes-lote";
+import { ProcessamentoLote } from "@/components/processamento-lote";
 import { SeloSku } from "@/components/selo";
 import { Icone } from "@/components/ledger-icons";
+
+export const metadata = { title: "Lote" };
 
 function paraFila(s: SkuRow): ItemFila {
   const cands = (s.candidatos ?? []) as Candidato[];
@@ -60,9 +63,7 @@ export default async function LotePage({ params }: { params: Promise<{ id: strin
         <div className="kpi"><div className="kpi__label">Cobráveis</div><div className="kpi__n tnum">{cobraveis}</div><div className="kpi__delta">certificados neste lote</div></div>
       </div>
 
-      {emProcesso && (
-        <p className="badge" role="status" style={{ marginTop: 24 }}><span className="dot dot--pulse" />Processando o lote. Atualize a página em alguns instantes.</p>
-      )}
+      <ProcessamentoLote processando={emProcesso} comErro={conta("ERRO_TEMPORARIO") > 0} />
 
       {aberto && (
         <div style={{ marginTop: 24 }}>

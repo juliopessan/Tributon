@@ -4,6 +4,8 @@ import { estadoCalibracao } from "@/lib/calibracao";
 import { AcaoLimiar } from "@/components/acao-limiar";
 import { Icone } from "@/components/ledger-icons";
 
+export const metadata = { title: "Calibração" };
+
 const p = (x: number) => `${(x * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 
 export default async function Calibracao() {

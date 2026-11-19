@@ -4,6 +4,8 @@ import { getDb } from "@/lib/db";
 import { sessaoOuLogin } from "@/lib/server-session";
 import { FormJson } from "@/components/form-json";
 
+export const metadata = { title: "Marca" };
+
 export default async function Marca() {
   const s = await sessaoOuLogin();
   if (s.papel !== "socio") redirect("/app");

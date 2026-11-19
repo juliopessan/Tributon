@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icone } from "@/components/ledger-icons";
+import { Verbo } from "@/components/verbo";
 
 export default function NovoLote() {
   const router = useRouter();
@@ -37,7 +38,7 @@ export default function NovoLote() {
             <div className="field"><label htmlFor="dataReferencia">Data de referência</label><input className="input" id="dataReferencia" name="dataReferencia" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required /></div>
             <div className="field"><label htmlFor="arquivo">Arquivo do cadastro (CSV, até 10 MB)</label><input className="input" id="arquivo" name="arquivo" type="file" accept=".csv,text/csv" required /><p className="hint">Aceita ";" ou "," e acentos (UTF-8 ou Latin-1).</p></div>
             {erro && <p className="field-error" role="alert" style={{ display: "flex" }}><Icone nome="error" tamanho={16} /><span>{erro}</span></p>}
-            <div className="row"><button className="btn" type="submit" disabled={enviando} aria-busy={enviando}>{enviando ? "Enviando..." : "Enviar para processamento"}</button></div>
+            <div className="row"><button className="btn" type="submit" disabled={enviando} aria-busy={enviando}>{enviando ? <Verbo conjunto="arquivo" rotulo="Enviando o cadastro" relogio={false} atraso={120} /> : "Enviar para processamento"}</button></div>
           </form>
         </div>
       </div>

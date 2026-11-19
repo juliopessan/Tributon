@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icone } from "./ledger-icons";
+import { Verbo } from "./verbo";
 
 export type LinhaCenario = { codigo: string; descricao: string; motivo: string };
 
@@ -9,6 +10,7 @@ export function FormRevisaoCenario({ permitidos, excluidos, podeAssinar }: { per
   const router = useRouter();
   const [erro, setErro] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
 
   async function enviar(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -22,7 +24,9 @@ export function FormRevisaoCenario({ permitidos, excluidos, podeAssinar }: { per
     }
     const itens = permitidos.map((p) => ({ codigo: p.codigo, decisao: String(f.get(`d-${p.codigo}`)), comentario: String(f.get(`c-${p.codigo}`) ?? "") }));
     const sugeridos = excluidos.filter((x) => f.get(`s-${x.codigo}`)).map((x) => x.codigo);
+    setOcupado(true);
     const res = await fetch("/api/cenario/revisao", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itens, sugeridos }) }).catch(() => null);
+    setOcupado(false);
     if (!res?.ok) return setErro(res ? (((await res.json().catch(() => ({}))) as { erro?: string }).erro ?? "A revisão não foi assinada.") : "Sem conexão com o servidor.");
     setOk(true);
     router.refresh();
@@ -68,7 +72,7 @@ export function FormRevisaoCenario({ permitidos, excluidos, podeAssinar }: { per
       {erro && <p className="field-error" role="alert" style={{ display: "flex" }}><Icone nome="error" tamanho={16} /><span>{erro}</span></p>}
       {ok && <p className="badge badge--ok" role="status"><Icone nome="success" />Revisão assinada</p>}
       {podeAssinar
-        ? <div className="row"><button className="btn" type="submit">Assinar revisão</button></div>
+        ? <div className="row"><button className="btn" type="submit" disabled={ocupado} aria-busy={ocupado}>{ocupado ? <Verbo conjunto="registro" rotulo="Assinando a revisão" relogio={false} atraso={120} /> : "Assinar revisão"}</button></div>
         : <p className="hint">Só o contador responsável assina a revisão do cenário.</p>}
     </form>
   );

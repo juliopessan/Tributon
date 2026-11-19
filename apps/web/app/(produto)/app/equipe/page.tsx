@@ -5,6 +5,8 @@ import { sessaoOuLogin } from "@/lib/server-session";
 import { ROTULO_PAPEL } from "@/lib/rotulos";
 import { FormJson } from "@/components/form-json";
 
+export const metadata = { title: "Equipe" };
+
 export default async function Equipe() {
   const s = await sessaoOuLogin();
   if (s.papel !== "socio") redirect("/app");

@@ -6,6 +6,8 @@ import { pct, ROTULO_STATUS_LOTE } from "@/lib/rotulos";
 import { Icone } from "@/components/ledger-icons";
 import { CENARIO_VENDA_INTERNA_V1 } from "@tributon/tax-pack";
 
+export const metadata = { title: "Lotes" };
+
 export default async function Lotes() {
   const s = await sessaoOuLogin();
   const { lotes, revisao } = await getDb().withTenant(s.escritorioId, async (c) => ({

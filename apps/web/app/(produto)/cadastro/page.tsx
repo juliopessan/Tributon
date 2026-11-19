@@ -2,6 +2,8 @@ import Link from "next/link";
 import { FormAuth } from "@/components/form-auth";
 import { PainelAuth } from "@/components/painel-auth";
 
+export const metadata = { title: "Cadastrar escritório" };
+
 export default function CadastroPage() {
   return (
     <div className="auth">

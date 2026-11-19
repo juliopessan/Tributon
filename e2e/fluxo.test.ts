@@ -18,7 +18,16 @@ beforeAll(async () => {
 });
 afterAll(async () => browser?.close());
 
-const shot = async (nome: string) => SHOTS && page.screenshot({ path: `${SHOTS}/${nome}.png`, fullPage: true });
+// Rola a página antes da captura: blocos com revelação animada só aparecem ao entrar na tela.
+const shot = async (nome: string) => {
+  if (!SHOTS) return;
+  await page.evaluate(async () => {
+    for (let y = 0; y < document.body.scrollHeight; y += 400) { window.scrollTo(0, y); await new Promise((r) => setTimeout(r, 200)); }
+    window.scrollTo(0, 0);
+  });
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: `${SHOTS}/${nome}.png`, fullPage: true });
+};
 
 async function login(email: string, senha: string) {
   await page.goto(`${BASE}/login`);
@@ -33,7 +42,13 @@ describe("fluxo completo", () => {
 
   it("shows the landing page", async () => {
     await page.goto(BASE);
-    await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toContain("Revisão de cadastro para a Reforma Tributária");
+    await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toContain("Cadastro errado vira nota rejeitada.");
+    expect(await page.locator("link[rel='icon'][type='image/svg+xml']").count()).toBe(1);
+    expect(await page.locator("meta[name='ledger:letter']").getAttribute("content")).toBe("T");
+    expect(await page.locator("[data-roll]").count()).toBe(1);
+    await page.waitForFunction(() => document.querySelectorAll("a[data-url-chip] .url__host").length >= 5);
+    expect(await page.locator("a[data-url-chip] .url__host").first().textContent()).toBe("contadores.cnt.br");
+    await page.waitForTimeout(12500); // o roller percorre os verbos e volta para a palavra de repouso
     await shot("01-landing");
   });
 
@@ -108,6 +123,7 @@ describe("fluxo completo", () => {
     expect(corpo).toContain("Regime: Simples Nacional");
     expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).not.toMatch(/Archivo/);
     expect(await page.locator("link[href*='fonts.googleapis']").count()).toBe(0);
+    expect(await page.locator("link[rel='icon'][href='/favicon.svg']").count()).toBe(0);
     await shot("03-relatorio-white-label");
   });
 

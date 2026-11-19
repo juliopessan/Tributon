@@ -6,6 +6,8 @@ import { sessaoOuLogin } from "@/lib/server-session";
 import { FormRevisaoCenario, type LinhaCenario } from "@/components/form-revisao-cenario";
 import { Icone } from "@/components/ledger-icons";
 
+export const metadata = { title: "Cenário" };
+
 export const dynamic = "force-dynamic";
 
 export default async function Cenario() {

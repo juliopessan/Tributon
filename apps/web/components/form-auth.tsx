@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icone } from "./ledger-icons";
+import { Verbo } from "./verbo";
 
 type Campo = { nome: string; rotulo: string; tipo?: string; autoComplete?: string; minLength?: number; inputMode?: "email" | "text"; dica?: string };
 
@@ -38,7 +39,7 @@ export function FormAuth({ endpoint, campos, botao, ocupado }: { endpoint: strin
           <Icone nome="error" tamanho={16} /><span>{erro}</span>
         </p>
       )}
-      <button className="btn btn--block" type="submit" disabled={enviando} aria-busy={enviando}>{enviando ? ocupado : botao}</button>
+      <button className="btn btn--block" type="submit" disabled={enviando} aria-busy={enviando}>{enviando ? <Verbo conjunto="acesso" rotulo={ocupado} relogio={false} atraso={120} /> : botao}</button>
     </form>
   );
 }
