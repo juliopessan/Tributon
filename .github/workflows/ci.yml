@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  ENGINE_REF: "1.6.1"          # tag do motor oficial da Receita Federal (a mesma do engine/run-engine.sh)
+  PLAYWRIGHT_VERSION: "1.63.0"
+
+jobs:
+  verificar:
+    name: Typecheck e testes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4   # versão lida de "packageManager" no package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Checar tipos de todos os pacotes
+        run: pnpm typecheck
+
+      - name: Postgres efêmero de teste
+        run: |
+          ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y postgresql)
+          scripts/test-db.sh | sed 's/^export //' >> "$GITHUB_ENV"
+
+      # Testes que dependem do motor oficial ou do Jev são pulados aqui (sem ENGINE_URL / JEV_LIVE);
+      # o job "Motor oficial e E2E" roda os do motor.
+      - name: Testes de unidade e integração
+        run: pnpm -r --workspace-concurrency=1 test
+
+  integracao:
+    name: Motor oficial e E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Cache do Maven (dependências do motor)
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: maven-motor-${{ env.ENGINE_REF }}
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Subir o motor oficial (clona a tag, gera o banco, compila)
+        run: |
+          nohup engine/run-engine.sh > "$RUNNER_TEMP/engine.log" 2>&1 &
+          PID=$!
+          for i in $(seq 1 120); do
+            if curl -sf http://localhost:8080/api/calculadora/dados-abertos/versao; then echo; exit 0; fi
+            if ! kill -0 "$PID" 2>/dev/null; then
+              echo "o script do motor terminou antes de responder" >&2
+              tail -80 "$RUNNER_TEMP/engine.log" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "o motor não subiu em 10 minutos" >&2
+          tail -50 "$RUNNER_TEMP/engine.log" >&2
+          exit 1
+        env:
+          ENGINE_REF: ${{ env.ENGINE_REF }}
+
+      - name: Postgres efêmero de teste
+        run: |
+          ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y postgresql)
+          scripts/test-db.sh | sed 's/^export //' >> "$GITHUB_ENV"
+
+      - name: Testes contra o motor oficial
+        run: pnpm --filter @tributon/tax-pack --filter @tributon/pipeline --filter @tributon/mcp exec vitest run
+        env:
+          ENGINE_URL: http://localhost:8080/api/calculadora
+
+      # O E2E carrega o Playwright por require(); instalado globalmente para não fixar uma versão no lockfile.
+      - name: Playwright e Chromium
+        run: |
+          npm install -g "playwright@${PLAYWRIGHT_VERSION}"
+          echo "NODE_PATH=$(npm root -g)" >> "$GITHUB_ENV"
+          npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium
+
+      - name: E2E (Postgres, motor, worker, web de produção e Chromium)
+        run: e2e/run-e2e.sh
+        env:
+          ENGINE_URL: http://localhost:8080/api/calculadora
+          E2E_SCREENSHOTS: ${{ runner.temp }}/screenshots
+
+      - name: Guardar logs e capturas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-integracao
+          path: |
+            ${{ runner.temp }}/engine.log
+            ${{ runner.temp }}/screenshots
+            /tmp/tributon-e2e-web.log
+            /tmp/tributon-e2e-worker.log
+          if-no-files-found: ignore
+          retention-days: 7
