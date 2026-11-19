@@ -5,7 +5,8 @@ const ENGINE_URL = process.env.ENGINE_URL;
 const DATA = "2026-11-18";
 
 describe.runIf(!!ENGINE_URL)("EngineClient (motor real)", () => {
-  const engine = new EngineClient({ baseUrl: ENGINE_URL! });
+  // O corpo do describe roda na coleta mesmo quando runIf é falso: sem ENGINE_URL, não construa o cliente.
+  const engine = new EngineClient({ baseUrl: ENGINE_URL ?? "http://motor-ausente.invalid" });
 
   it("versao returns app and db versions", async () => {
     expect(await engine.versao()).toMatch(/^\d+\.\d+\.\d+\/V\d+$/);

@@ -6,7 +6,8 @@ import { executarSku, POLITICA_PADRAO } from "../src/index.ts";
 const live = !!process.env.ENGINE_URL && process.env.JEV_LIVE === "1";
 
 describe.runIf(live)("executarSku ao vivo (motor real + Jev)", () => {
-  const engine = new EngineClient({ baseUrl: process.env.ENGINE_URL! });
+  // O corpo do describe roda na coleta mesmo quando runIf é falso: não dependa de ENGINE_URL aqui.
+  const engine = new EngineClient({ baseUrl: process.env.ENGINE_URL ?? "http://motor-ausente.invalid" });
   const ctx = { data: "2026-11-18", municipio: 4314902, uf: "RS", motorVersao: "live" };
   const deps = { index: new CandidateIndex(engine, ctx.data), backend: new JevBackend(), engine, ctx, politica: POLITICA_PADRAO };
 
