@@ -1,5 +1,7 @@
 # Tributon
 
+[![CI](https://github.com/juliopessan/Tributon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/juliopessan/Tributon/actions/workflows/ci.yml?query=branch%3Amain)
+
 Revisão de cadastro para a Reforma Tributária, vendida como resultado (service-as-software) e em white-label para escritórios contábeis.
 Cada SKU é classificado (CST + cClassTrib) **apenas entre candidatos válidos**, **verificado no motor oficial** da Calculadora de Tributos
 ([ReceitaFederal/calculadora-rtc-regime-regular](https://github.com/ReceitaFederal/calculadora-rtc-regime-regular), MIT, © Receita Federal do Brasil)
