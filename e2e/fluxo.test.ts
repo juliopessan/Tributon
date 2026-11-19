@@ -43,6 +43,9 @@ describe("fluxo completo", () => {
   it("shows the landing page", async () => {
     await page.goto(BASE);
     await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toContain("Cadastro errado vira nota rejeitada.");
+    // O favicon SVG é criado no navegador pelo ledger.js (carregado depois da hidratação): espere por ele
+    // e então exija exatamente um, para continuar pegando a duplicação com o <link> do Next.
+    await page.waitForFunction(() => document.querySelectorAll("link[rel='icon'][type='image/svg+xml']").length > 0);
     expect(await page.locator("link[rel='icon'][type='image/svg+xml']").count()).toBe(1);
     expect(await page.locator("meta[name='ledger:letter']").getAttribute("content")).toBe("T");
     expect(await page.locator("[data-roll]").count()).toBe(1);
