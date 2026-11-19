@@ -17,15 +17,35 @@ if [ ! -d "$SRC/.git" ]; then
 fi
 cd "$SRC"
 
+# O repositório oficial não versiona o maven-wrapper.jar, e o mvnw o baixa em silêncio:
+# se o download falha, o erro vira um "MavenWrapperMain não encontrado" sem explicação.
+# Baixamos nós mesmos (com novas tentativas e erro visível); sem ele, usamos o mvn do sistema.
+MVN=(./mvnw)
+WRAPPER_JAR=.mvn/wrapper/maven-wrapper.jar
+if [ ! -s "$WRAPPER_JAR" ]; then
+  WRAPPER_URL="$(sed -n 's/^wrapperUrl=//p' .mvn/wrapper/maven-wrapper.properties | tr -d '\r')"
+  echo "[engine] baixando o Maven Wrapper: $WRAPPER_URL"
+  if ! curl -fsSL --retry 4 --retry-all-errors -o "$WRAPPER_JAR" "$WRAPPER_URL"; then
+    rm -f "$WRAPPER_JAR"
+    if command -v mvn >/dev/null; then
+      echo "[engine] sem o wrapper; usando o mvn do sistema ($(mvn -v | head -1))"
+      MVN=(mvn)
+    else
+      echo "[engine] não foi possível baixar o Maven Wrapper e não há mvn instalado" >&2
+      exit 1
+    fi
+  fi
+fi
+
 if [ ! -f calculadora/db/calculadora-pro.db ]; then
   echo "[engine] gerando banco SQLite (Flyway)..."
   mkdir -p calculadora/db
-  ./mvnw flyway:migrate -Dflyway.configFiles=./flyway/flyway-pro.conf --batch-mode --errors -q
+  "${MVN[@]}" flyway:migrate -Dflyway.configFiles=./flyway/flyway-pro.conf --batch-mode --errors -q
 fi
 JAR="$(ls target/*.jar 2>/dev/null | head -1 || true)"
 if [ -z "$JAR" ]; then
   echo "[engine] compilando o motor..."
-  ./mvnw -DskipTests package --batch-mode -q
+  "${MVN[@]}" -DskipTests package --batch-mode -q
   JAR="$(ls target/*.jar | head -1)"
 fi
 
