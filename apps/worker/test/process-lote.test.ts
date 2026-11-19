@@ -1,0 +1,142 @@
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { FakeBackend } from "@tributon/classifier";
+import { EngineUnavailableError, type EngineClient, type Classificacao } from "@tributon/tax-pack";
+import { repos, type Db } from "@tributon/db";
+import { createTestDb } from "@tributon/db/test-helpers";
+import { processarLote, reivindicarProximoLote } from "../src/process-lote.ts";
+
+let t: Awaited<ReturnType<typeof createTestDb>>;
+let db: Db;
+let esc: string;
+
+const cls = (codigo: string): Classificacao => ({
+  codigo, cst: codigo.slice(0, 3), descricao: `d${codigo}`, nomenclatura: "NCM",
+  descricaoTratamentoTributario: "t", dfes: ["NF-e"], possuiPercentualReducao: false,
+});
+
+function fakeEngine(state: { down: boolean }) {
+  return {
+    async versao() { return "1.6.1/V0059"; },
+    async ncmExiste(ncm: string) { return ncm !== "99999999"; },
+    async classificacoes() { return [cls("000001"), cls("200003")]; },
+    async ncmAplicavel() { return true; },
+    async calcularItem() {
+      if (state.down) throw new EngineUnavailableError("motor fora");
+      return { estadoItem: "CALCULADO" as const, erros: [] };
+    },
+  } as unknown as EngineClient;
+}
+
+const skus = [
+  { codigo: "1", descricao: "Arroz", ncmBruto: "10063021" },
+  { codigo: "2", descricao: "Cerveja", ncmBruto: "22030000" },
+  { codigo: "3", descricao: "Inexistente", ncmBruto: "99999999" },
+];
+const cenario = { versao: "t", revisadoPor: null, permitidos: [{ codigo: "000001", motivo: "" }, { codigo: "200003", motivo: "" }] };
+
+beforeAll(async () => {
+  t = await createTestDb();
+  db = t.db;
+  esc = (await db.criarEscritorioComSocio({ escritorio: "E", nome: "N", email: "w@e.com", senhaHash: "h" })).escritorioId;
+});
+afterAll(async () => t.drop());
+
+describe("processarLote", () => {
+  it("processes all skus, records events and stores the engine version", async () => {
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "X", dataReferencia: "2026-11-18", skus }));
+    const r = await processarLote(db, lote.id, { backend: new FakeBackend(), engine: fakeEngine({ down: false }), cenario });
+    expect(r).toEqual({ processados: 3, temporarios: 0 });
+    const out = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    expect(out.map((s) => s.status)).toEqual(["EM_REVISAO", "EM_REVISAO", "PENDENTE_CLIENTE"]);
+    expect(out[0]).toMatchObject({ ncm: "10063021", cst: "000", cClassTrib: "000001", tentativas: 1 });
+    expect(out[0]!.candidatos).toHaveLength(2);
+    const l = await db.withTenant(esc, (c) => repos.obterLote(c, lote.id));
+    expect(l).toMatchObject({ status: "EM_REVISAO", motorVersao: "1.6.1/V0059" });
+    const eventos = await db.withTenant(esc, async (c) => (await c.query("SELECT count(*)::int AS n FROM eventos_auditoria WHERE lote_id = $1 AND tipo = 'sku_processado'", [lote.id])).rows[0].n);
+    expect(eventos).toBe(3);
+  });
+
+  it("marks skus ERRO_TEMPORARIO when the engine is down and reprocesses only them", async () => {
+    const state = { down: true };
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Y", dataReferencia: "2026-11-18", skus }));
+    const first = await processarLote(db, lote.id, { backend: new FakeBackend(), engine: fakeEngine(state), cenario });
+    expect(first).toEqual({ processados: 3, temporarios: 2 });
+    let out = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    expect(out.map((s) => s.status)).toEqual(["ERRO_TEMPORARIO", "ERRO_TEMPORARIO", "PENDENTE_CLIENTE"]);
+
+    state.down = false;
+    const second = await processarLote(db, lote.id, { backend: new FakeBackend(), engine: fakeEngine(state), cenario });
+    expect(second).toEqual({ processados: 2, temporarios: 0 });
+    out = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    expect(out.map((s) => s.status)).toEqual(["EM_REVISAO", "EM_REVISAO", "PENDENTE_CLIENTE"]);
+  });
+
+  it("auto-certifies only when the lote has a calibrated threshold", async () => {
+    const backend = new FakeBackend(() => ({ choice: "200003", confidence: 0.97 }));
+    const semLimiar = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Z", dataReferencia: "2026-11-18", skus: skus.slice(0, 1) }));
+    const comLimiar = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Z", dataReferencia: "2026-11-18", skus: skus.slice(0, 1), threshold: 0.95 }));
+    await processarLote(db, semLimiar.id, { backend, engine: fakeEngine({ down: false }), cenario });
+    await processarLote(db, comLimiar.id, { backend, engine: fakeEngine({ down: false }), cenario });
+    const [a] = await db.withTenant(esc, (c) => repos.listarSkus(c, semLimiar.id));
+    const [b] = await db.withTenant(esc, (c) => repos.listarSkus(c, comLimiar.id));
+    expect(a!.status).toBe("EM_REVISAO");
+    expect(b!.status).toBe("CERTIFICADO_AUTO");
+  });
+});
+
+describe("reivindicarProximoLote", () => {
+  it("claims the oldest queued lote once", async () => {
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Q", dataReferencia: "2026-11-18", skus: [] }));
+    const claimed: string[] = [];
+    let next;
+    while ((next = await reivindicarProximoLote(db))) claimed.push(next.loteId);
+    expect(claimed).toContain(lote.id);
+    expect(new Set(claimed).size).toBe(claimed.length);
+    expect((await db.withTenant(esc, (c) => repos.obterLote(c, lote.id)))!.status).toBe("PROCESSANDO");
+  });
+});
+
+describe("robustez (revisão final)", () => {
+  it("isolates an unexpected per-SKU error instead of failing the whole lote", async () => {
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Veneno", dataReferencia: "2026-11-18", skus: skus.slice(0, 2) }));
+    const backend = new FakeBackend((input) => ({ choice: input.state.descricao === "Arroz" ? "999999" : "000001" })); // escolha inválida → erro inesperado
+    const r = await processarLote(db, lote.id, { backend, engine: fakeEngine({ down: false }), cenario });
+    expect(r.processados).toBe(2);
+    const out = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    expect(out[0]).toMatchObject({ status: "EM_REVISAO" });
+    expect(out[0]!.motivo).toMatch(/erro inesperado/);
+    expect(out[1]!.status).toBe("EM_REVISAO");
+    expect((await db.withTenant(esc, (c) => repos.obterLote(c, lote.id)))!.status).toBe("EM_REVISAO");
+  });
+
+  it("reclaims a lote left PROCESSANDO by a crashed worker after the lease expires", async () => {
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Crash", dataReferencia: "2026-11-18", skus: [] }));
+    while (await reivindicarProximoLote(db)) { /* esvazia a fila */ }
+    await db.withSystem((c) => c.query("UPDATE lotes SET status = 'PROCESSANDO', reivindicado_em = now() - interval '11 minutes' WHERE id = $1", [lote.id]));
+    const again = await reivindicarProximoLote(db);
+    expect(again?.loteId).toBe(lote.id);
+    expect(await reivindicarProximoLote(db)).toBeNull(); // lease renovado: não pega de novo
+  });
+});
+
+describe("escolha original do modelo (calibração)", () => {
+  it("stores the model choice once and never overwrites it", async () => {
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Calib", dataReferencia: "2026-11-18", skus: skus.slice(0, 1) }));
+    await processarLote(db, lote.id, { backend: new FakeBackend(() => ({ choice: "200003", confidence: 0.97 })), engine: fakeEngine({ down: false }), cenario });
+    let [s] = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    expect(s).toMatchObject({ escolhaModelo: "200003", confiancaModelo: 0.97, backendModelo: "fake" });
+
+    await db.withTenant(esc, (c) => repos.atualizarSku(c, s!.id, { status: "NA_FILA" }));
+    await processarLote(db, lote.id, { backend: new FakeBackend(() => ({ choice: "000001", confidence: 0.6 })), engine: fakeEngine({ down: false }), cenario });
+    [s] = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    expect(s).toMatchObject({ escolhaModelo: "200003", confiancaModelo: 0.97, cClassTrib: "000001" });
+  });
+
+  it("does not record a choice when no model decided (single candidate)", async () => {
+    const umSo = { versao: "t", revisadoPor: null, permitidos: [{ codigo: "000001", motivo: "" }] };
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Det", dataReferencia: "2026-11-18", skus: skus.slice(0, 1) }));
+    await processarLote(db, lote.id, { backend: new FakeBackend(), engine: fakeEngine({ down: false }), cenario: umSo });
+    const [s] = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    expect(s).toMatchObject({ escolhaModelo: null, confiancaModelo: null });
+  });
+});

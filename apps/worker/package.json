@@ -1,0 +1,14 @@
+{
+  "name": "@tributon/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/process-lote.ts",
+  "scripts": { "test": "vitest run", "start": "node --experimental-strip-types src/main.ts" },
+  "dependencies": {
+    "@tributon/classifier": "workspace:*",
+    "@tributon/tax-pack": "workspace:*",
+    "@tributon/pipeline": "workspace:*",
+    "@tributon/db": "workspace:*"
+  }
+}

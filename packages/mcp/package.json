@@ -1,0 +1,16 @@
+{
+  "name": "@tributon/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/server.ts",
+  "bin": { "tributon-mcp": "./src/main.ts" },
+  "scripts": { "test": "vitest run", "start": "node --experimental-strip-types --no-warnings src/main.ts" },
+  "dependencies": {
+    "@tributon/classifier": "workspace:*",
+    "@tributon/pipeline": "workspace:*",
+    "@tributon/tax-pack": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "zod": "^3.25.76"
+  }
+}
