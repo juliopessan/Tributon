@@ -25,6 +25,8 @@ export type SkuResultado = {
   status: SkuStatus;
   ncm: string | null;
   decisao?: Decision;
+  /** Primeira decisão do modelo no SKU (antes de qualquer recusa do motor): é o rótulo de referência da calibração. */
+  primeiraDecisao?: Decision;
   candidatos?: Candidato[];
   escolhido?: Candidato;
   verificacao?: Verificacao;

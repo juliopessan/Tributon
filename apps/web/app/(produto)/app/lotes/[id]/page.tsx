@@ -51,7 +51,9 @@ export default async function LotePage({ params }: { params: Promise<{ id: strin
           </p>
         </div>
         <div className="row" style={{ flexWrap: "wrap" }}>
-          <a className="link" href={`/api/lotes/${lote.id}/export`}><Icone nome="download" tamanho={16} />Exportar CSV para o ERP</a>
+          {lote.status === "CONCLUIDO"
+            ? <a className="link" href={`/api/lotes/${lote.id}/export`}><Icone nome="download" tamanho={16} />Exportar CSV para o ERP</a>
+            : <span className="meta">Exportação liberada após a assinatura</span>}
           {lote.tokenRelatorio && <a className="link" href={`/r/${lote.tokenRelatorio}`} target="_blank" rel="noreferrer">Relatório do cliente <Icone nome="external" tamanho={16} /></a>}
         </div>
       </div>

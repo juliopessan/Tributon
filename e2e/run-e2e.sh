@@ -18,7 +18,8 @@ export CLASSIFIER_BACKEND=fake WORKER_POLL_MS=300 E2E_BASE_URL="http://localhost
 # (o Next renomeia o processo para "next-server", então procura pelo nome também)
 pkill -f "next start -p 3100" 2>/dev/null || true; pkill -f "next-server" 2>/dev/null || true; sleep 1
 if curl -s -o /dev/null "http://localhost:3100"; then echo "porta 3100 ocupada por outro processo" >&2; exit 1; fi
-[ -d apps/web/.next ] || (cd apps/web && npx next build >/dev/null)
+# Build sempre: reaproveitar um .next antigo testaria código velho (o próprio Next usa o cache dele).
+(cd apps/web && npx next build >/dev/null)
 # Cada serviço no próprio grupo de processos, para a saída encerrar também os filhos.
 setsid bash -c 'cd apps/web && exec npx next start -p 3100' > /tmp/tributon-e2e-web.log 2>&1 & WEB=$!
 setsid bash -c 'cd apps/worker && exec node --experimental-strip-types --no-warnings src/main.ts' > /tmp/tributon-e2e-worker.log 2>&1 & WRK=$!

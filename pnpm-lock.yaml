@@ -48,12 +48,18 @@ importers:
         specifier: 19.1.1
         version: 19.1.1(react@19.1.1)
     devDependencies:
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
       '@types/react':
         specifier: 19.1.13
         version: 19.1.13
       '@types/react-dom':
         specifier: 19.1.9
         version: 19.1.9(@types/react@19.1.13)
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
 
   apps/worker:
     dependencies:

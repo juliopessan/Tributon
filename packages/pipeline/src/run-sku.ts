@@ -43,6 +43,8 @@ export async function executarSku(sku: SkuEntrada, deps: DepsSku): Promise<SkuRe
     let restantes = candidatos;
     let ultima: { decisao: Decision; escolhido: Candidato; verificacao: Verificacao } | undefined;
     let tentativas = 0;
+    let primeiraDecisao: Decision | undefined;
+    const recusados: string[] = [];
 
     while (restantes.length > 0 && tentativas < deps.politica.maxTentativas) {
       tentativas++;
@@ -54,22 +56,30 @@ export async function executarSku(sku: SkuEntrada, deps: DepsSku): Promise<SkuRe
         },
         deps.backend,
       );
+      if (!primeiraDecisao && decisao.backend !== "deterministico") primeiraDecisao = decisao;
       const escolhido = restantes.find((c) => c.codigo === decisao.choice)!;
       const verificacao = await verificar(deps.engine, ncm, escolhido, deps.ctx);
       ultima = { decisao, escolhido, verificacao };
+      const extra = primeiraDecisao ? { primeiraDecisao } : {};
 
       if (verificacao.estadoItem === "NAO_IMPLEMENTADO") {
-        return { status: "NAO_SUPORTADO", ncm, candidatos, ...ultima, motivo: "tratamento não implementado no motor", tentativas };
+        return { status: "NAO_SUPORTADO", ncm, candidatos, ...ultima, ...extra, motivo: "tratamento não implementado no motor", tentativas };
       }
       if (verificacao.ok) {
-        return { status: rotear(decisao, verificacao, deps.politica), ncm, candidatos, ...ultima, tentativas };
+        // Escolha feita depois de uma recusa do motor não tem confiança calibrada (com um candidato restante,
+        // o atalho determinístico daria 1): vai sempre para revisão humana.
+        if (recusados.length > 0) {
+          return { status: "EM_REVISAO", ncm, candidatos, ...ultima, ...extra, motivo: `motor recusou ${recusados.join(", ")}`, tentativas };
+        }
+        return { status: rotear(decisao, verificacao, deps.politica), ncm, candidatos, ...ultima, ...extra, tentativas };
       }
       if (verificacao.estadoItem === "FALHA_TECNICA") throw new EngineUnavailableError("falha técnica no motor");
+      recusados.push(escolhido.codigo);
       restantes = restantes.filter((c) => c.codigo !== escolhido.codigo);
     }
 
     const codigos = ultima?.verificacao.erros.map((e) => e.code).join(", ") || "verificação recusada";
-    return { status: "EM_REVISAO", ncm, candidatos, ...ultima, motivo: codigos, tentativas };
+    return { status: "EM_REVISAO", ncm, candidatos, ...ultima, ...(primeiraDecisao ? { primeiraDecisao } : {}), motivo: codigos, tentativas };
   } catch (err) {
     if (err instanceof ClassifierUnavailableError || err instanceof EngineUnavailableError) {
       return { status: "ERRO_TEMPORARIO", ncm, motivo: err.message, tentativas: 0 };

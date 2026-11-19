@@ -1,7 +1,7 @@
 import { FakeBackend, JevBackend, type DecisionBackend } from "@tributon/classifier";
 import { EngineClient } from "@tributon/tax-pack";
 import { createDb } from "@tributon/db";
-import { processarLote, reivindicarProximoLote } from "./process-lote.ts";
+import { ConcessaoPerdidaError, processarLote, reivindicarProximoLote } from "./process-lote.ts";
 
 const required = (k: string) => {
   const v = process.env[k];
@@ -25,11 +25,16 @@ while (!stopping) {
     continue;
   }
   try {
-    const r = await processarLote(db, next.loteId, { backend, engine });
+    const r = await processarLote(db, next.loteId, { backend, engine }, next.reivindicacao);
     console.log(`[worker] lote ${next.loteId}: ${r.processados} processados, ${r.temporarios} temporários`);
   } catch (err) {
+    if (err instanceof ConcessaoPerdidaError) {
+      console.warn(`[worker] ${err.message}; outro worker assumiu ou o lote mudou de estado`);
+      continue;
+    }
     console.error(`[worker] lote ${next.loteId} falhou:`, (err as Error).message);
-    await db.withSystem((c) => c.query("UPDATE lotes SET status = 'NA_FILA' WHERE id = $1", [next.loteId])).catch(() => {});
+    // Devolve à fila só se ainda for nosso.
+    await db.withSystem((c) => c.query("UPDATE lotes SET status = 'NA_FILA' WHERE id = $1 AND reivindicacao = $2 AND status = 'PROCESSANDO'", [next.loteId, next.reivindicacao])).catch(() => {});
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }

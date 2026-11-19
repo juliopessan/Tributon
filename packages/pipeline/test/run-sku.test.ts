@@ -94,7 +94,28 @@ describe("executarSku", () => {
       candidatos: ["000001", "200003"],
       calc: (c) => c === "200003" ? { estadoItem: "INCONSISTENCIA_ENTRADA", erros: [{ code: "REG-011", detail: "x" }] } : { estadoItem: "CALCULADO", erros: [] },
     }, backend, 0.9));
-    expect(r).toMatchObject({ status: "CERTIFICADO_AUTO", escolhido: { codigo: "000001" }, tentativas: 2 });
+    expect(r).toMatchObject({ status: "EM_REVISAO", escolhido: { codigo: "000001" }, tentativas: 2 });
+  });
+
+  it("never auto-certifies a choice made after an engine refusal", async () => {
+    const backend = new FakeBackend(() => ({ choice: "200003", confidence: 0.99 }));
+    const r = await executarSku(sku, deps({
+      candidatos: ["000001", "200003"],
+      calc: (c) => c === "200003" ? { estadoItem: "INCONSISTENCIA_ENTRADA", erros: [{ code: "REG-011", detail: "x" }] } : { estadoItem: "CALCULADO", erros: [] },
+    }, backend, 0.9));
+    expect(r.status).toBe("EM_REVISAO");
+    expect(r.verificacao?.ok).toBe(true);
+    expect(r.motivo).toMatch(/recusou 200003/);
+  });
+
+  it("keeps the model's first decision separately for calibration", async () => {
+    const backend = new FakeBackend(() => ({ choice: "200003", confidence: 0.95 }));
+    const r = await executarSku(sku, deps({
+      candidatos: ["000001", "200003"],
+      calc: (c) => c === "200003" ? { estadoItem: "INCONSISTENCIA_ENTRADA", erros: [{ code: "REG-011", detail: "x" }] } : { estadoItem: "CALCULADO", erros: [] },
+    }, backend, 0.9));
+    expect(r.primeiraDecisao).toMatchObject({ choice: "200003", confidence: 0.95, backend: "fake" });
+    expect(r.decisao?.choice).toBe("000001");
   });
 
   it("goes to review with REG codes after exhausting attempts", async () => {

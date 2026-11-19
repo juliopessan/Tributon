@@ -328,3 +328,14 @@ export async function ultimaRevisaoCenario(c: Client, versao: string): Promise<R
   const x = r.rows[0];
   return x ? { cenarioVersao: x.cenario_versao, itens: x.itens, sugeridos: x.sugeridos, discordancias: x.discordancias, assinadoPor: x.nome, criadoEm: x.criado_em } : null;
 }
+
+/**
+ * Lê o lote travando a linha até o fim da transação (FOR UPDATE). Assinatura, decisões
+ * e reprocessamento passam por aqui para não intercalarem mudanças num lote sendo assinado.
+ */
+export async function travarLote(c: Client, id: string): Promise<Lote | null> {
+  if (!isUuid(id)) return null;
+  const r = await c.query("SELECT id FROM lotes WHERE id = $1 FOR UPDATE", [id]);
+  if (r.rowCount === 0) return null;
+  return obterLote(c, id);
+}

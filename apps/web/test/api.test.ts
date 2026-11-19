@@ -2,6 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createTestDb } from "@tributon/db/test-helpers";
 import { repos, type Db } from "@tributon/db";
 import { setDbForTests } from "@/lib/db";
+import { setEngineForTests } from "@/lib/engine";
+import type { EngineClient } from "@tributon/tax-pack";
+import pg from "pg";
+import { GET as exportar } from "@/app/api/lotes/[id]/export/route";
 import { criarSessao, NOME_COOKIE, type Sessao } from "@/lib/session";
 import { POST as criarLote, GET as listarLotes } from "@/app/api/lotes/route";
 import { POST as decidir } from "@/app/api/skus/[id]/decisao/route";
@@ -12,6 +16,17 @@ import { POST as salvarMarca } from "@/app/api/marca/route";
 let t: Awaited<ReturnType<typeof createTestDb>>;
 let db: Db;
 let socioA: Sessao;
+/** Motor falso: recusa 410004 e aceita o resto; `fora` simula o motor indisponível. */
+const estadoMotor = { fora: false };
+const motorFalso = {
+  async versao() { return "1.6.1/V0059"; },
+  async calcularItem(item: { cClassTrib: string }) {
+    if (estadoMotor.fora) throw new TypeError("fetch failed");
+    return item.cClassTrib === "200003"
+      ? { estadoItem: "INCONSISTENCIA_ENTRADA" as const, erros: [{ code: "REG-011", detail: "NCM não vinculada" }] }
+      : { estadoItem: "CALCULADO" as const, erros: [], memoriaCalculo: "Art. 125" };
+  },
+} as unknown as EngineClient;
 let socioB: Sessao;
 
 const latin1 = (s: string): Uint8Array<ArrayBuffer> => Uint8Array.from([...s].map((ch) => ch.charCodeAt(0)));
@@ -41,6 +56,7 @@ beforeAll(async () => {
   t = await createTestDb();
   db = t.db;
   setDbForTests(db);
+  setEngineForTests(motorFalso);
   await db.criarEscritorioComSocio({ escritorio: "Contábil A", nome: "Ana", email: "ana@a.com", senhaHash: "h" });
   await db.criarEscritorioComSocio({ escritorio: "Contábil B", nome: "Bia", email: "bia@b.com", senhaHash: "h" });
   socioA = await sessaoDe(db, "ana@a.com");
@@ -122,11 +138,35 @@ describe("review and sign-off", () => {
     expect((await r.json()).erro).toMatch(/1 SKU/);
   });
 
+  it("refuses approving a code the official engine rejects", async () => {
+    const r = await decidir(await req(`/api/skus/${skuId}/decisao`, analista, jsonInit({ acao: "aprovar" })), params({ id: skuId }));
+    expect(r.status).toBe(422);
+    expect((await r.json()).erro).toMatch(/motor oficial recusou 200003.*REG-011/);
+    expect((await db.withTenant(socioA.escritorioId, (c) => repos.obterSku(c, skuId)))!.status).toBe("EM_REVISAO");
+  });
+
+  it("answers 503 and certifies nothing while the engine is unavailable", async () => {
+    estadoMotor.fora = true;
+    try {
+      const r = await decidir(await req(`/api/skus/${skuId}/decisao`, analista, jsonInit({ acao: "trocar", cClassTrib: "000001" })), params({ id: skuId }));
+      expect(r.status).toBe(503);
+    } finally {
+      estadoMotor.fora = false;
+    }
+    expect((await db.withTenant(socioA.escritorioId, (c) => repos.obterSku(c, skuId)))!.status).toBe("EM_REVISAO");
+  });
+
+  it("does not export a lote before it is signed", async () => {
+    const r = await exportar(await req(`/api/lotes/${loteId}/export`, socioA), params({ id: loteId }));
+    expect(r.status).toBe(409);
+  });
+
   it("lets an analyst switch within candidates, recording the change", async () => {
     const r = await decidir(await req(`/api/skus/${skuId}/decisao`, analista, jsonInit({ acao: "trocar", cClassTrib: "000001", justificativa: "não é cesta básica" })), params({ id: skuId }));
     expect(r.status).toBe(200);
     const sku = await db.withTenant(socioA.escritorioId, (c) => repos.obterSku(c, skuId));
     expect(sku).toMatchObject({ status: "CERTIFICADO_REVISADO", cst: "000", cClassTrib: "000001", revisadoPor: analista.usuarioId });
+    expect(sku!.verificacao).toMatchObject({ ok: true, estadoItem: "CALCULADO", memoriaCalculo: "Art. 125", motorVersao: "1.6.1/V0059" });
   });
 
   it("does not let an analyst conclude the lote", async () => {
@@ -142,6 +182,34 @@ describe("review and sign-off", () => {
     const eventos = await db.withTenant(socioA.escritorioId, async (c) =>
       (await c.query("SELECT tipo FROM eventos_auditoria WHERE lote_id = $1 ORDER BY id", [loteId])).rows.map((x) => x.tipo));
     expect(eventos).toEqual(expect.arrayContaining(["sku_decidido", "lote_assinado"]));
+  });
+
+  it("exports the signed lote", async () => {
+    const r = await exportar(await req(`/api/lotes/${loteId}/export`, socioA), params({ id: loteId }));
+    expect(r.status).toBe(200);
+    expect(await r.text()).toContain("CERTIFICADO_REVISADO");
+  });
+
+  it("serializes sign-off with concurrent changes to the lote (row lock)", async () => {
+    const outro = await db.withTenant(socioA.escritorioId, async (c) => {
+      const l = await repos.criarLote(c, { cliente: "Corrida", dataReferencia: "2026-11-18", skus: [{ codigo: "1", descricao: "Arroz", ncmBruto: "10063021" }] });
+      const [s1] = await repos.listarSkus(c, l.id);
+      await repos.atualizarSku(c, s1!.id, { status: "CERTIFICADO_REVISADO", cClassTrib: "000001", cst: "000" });
+      await repos.atualizarLote(c, l.id, { status: "EM_REVISAO" });
+      return l.id;
+    });
+    // Outra transação (ex.: um reprocessamento) segura o lote e o devolve à fila.
+    const dona = new pg.Client({ connectionString: t.ownerUrl });
+    await dona.connect();
+    await dona.query("BEGIN");
+    await dona.query("SELECT id FROM lotes WHERE id = $1 FOR UPDATE", [outro]);
+    const assinatura = concluir(await req(`/api/lotes/${outro}/concluir`, contador, { method: "POST" }), params({ id: outro }));
+    await new Promise((r) => setTimeout(r, 300));
+    await dona.query("UPDATE lotes SET status = 'NA_FILA' WHERE id = $1", [outro]);
+    await dona.query("COMMIT");
+    await dona.end();
+    expect((await assinatura).status).toBe(409);
+    expect((await db.withTenant(socioA.escritorioId, (c) => repos.obterLote(c, outro)))!.status).toBe("NA_FILA");
   });
 
   it("refuses decisions on a concluded lote", async () => {

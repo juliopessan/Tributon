@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc -b"
+    "typecheck": "pnpm -r --workspace-concurrency=1 exec tsc -p . --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

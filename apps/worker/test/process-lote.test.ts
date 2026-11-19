@@ -3,7 +3,7 @@ import { FakeBackend } from "@tributon/classifier";
 import { EngineUnavailableError, type EngineClient, type Classificacao } from "@tributon/tax-pack";
 import { repos, type Db } from "@tributon/db";
 import { createTestDb } from "@tributon/db/test-helpers";
-import { processarLote, reivindicarProximoLote } from "../src/process-lote.ts";
+import { processarLote, reivindicarProximoLote, ConcessaoPerdidaError } from "../src/process-lote.ts";
 
 let t: Awaited<ReturnType<typeof createTestDb>>;
 let db: Db;
@@ -138,5 +138,60 @@ describe("escolha original do modelo (calibração)", () => {
     await processarLote(db, lote.id, { backend: new FakeBackend(), engine: fakeEngine({ down: false }), cenario: umSo });
     const [s] = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
     expect(s).toMatchObject({ escolhaModelo: null, confiancaModelo: null });
+  });
+});
+
+describe("revisão do PR #1", () => {
+  const recusa200003 = (versao = "1.6.1/V0059") => {
+    const e = fakeEngine({ down: false }) as unknown as Record<string, unknown>;
+    e.versao = async () => versao;
+    e.calcularItem = async (item: { cClassTrib: string }) =>
+      item.cClassTrib === "200003" ? { estadoItem: "INCONSISTENCIA_ENTRADA", erros: [{ code: "REG-011", detail: "x" }] } : { estadoItem: "CALCULADO", erros: [] };
+    return e as unknown as EngineClient;
+  };
+
+  it("labels calibration with the model's first decision, not the one after a refusal", async () => {
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Primeira", dataReferencia: "2026-11-18", skus: skus.slice(0, 1) }));
+    await processarLote(db, lote.id, { backend: new FakeBackend(() => ({ choice: "200003", confidence: 0.95 })), engine: recusa200003(), cenario });
+    const [s] = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    expect(s).toMatchObject({ escolhaModelo: "200003", confiancaModelo: 0.95, cClassTrib: "000001", status: "EM_REVISAO" });
+  });
+
+  it("keeps the engine version of the first run and refuses to resume on another version", async () => {
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Versao", dataReferencia: "2026-11-18", skus: skus.slice(0, 2) }));
+    await processarLote(db, lote.id, { backend: new FakeBackend(), engine: recusa200003("1.6.1/V0059"), cenario });
+    const [s1] = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    await db.withTenant(esc, (c) => repos.atualizarSku(c, s1!.id, { status: "ERRO_TEMPORARIO" }));
+    const r = await processarLote(db, lote.id, { backend: new FakeBackend(), engine: recusa200003("1.7.0/V0070"), cenario });
+    expect(r.processados).toBe(0);
+    const l = await db.withTenant(esc, (c) => repos.obterLote(c, lote.id));
+    expect(l).toMatchObject({ motorVersao: "1.6.1/V0059", status: "EM_REVISAO" });
+    const [depois] = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    expect(depois).toMatchObject({ status: "ERRO_TEMPORARIO" });
+    expect(depois!.motivo).toMatch(/versão do motor mudou/);
+  });
+
+  it("stops a worker that lost its lease without writing anything", async () => {
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Concessao", dataReferencia: "2026-11-18", skus: skus.slice(0, 2) }));
+    // Esvazia a fila até reivindicar este lote: esta é a concessão do worker "antigo".
+    let antigo: Awaited<ReturnType<typeof reivindicarProximoLote>> = null;
+    for (let n = await reivindicarProximoLote(db); n; n = await reivindicarProximoLote(db)) {
+      if (n.loteId === lote.id) { antigo = n; break; }
+    }
+    await db.withSystem((c) => c.query("UPDATE lotes SET reivindicado_em = now() - interval '11 minutes' WHERE id = $1", [lote.id]));
+    const novo = await reivindicarProximoLote(db);
+    expect(novo?.loteId).toBe(lote.id);
+    await expect(processarLote(db, lote.id, { backend: new FakeBackend(), engine: fakeEngine({ down: false }), cenario }, antigo!.reivindicacao))
+      .rejects.toBeInstanceOf(ConcessaoPerdidaError);
+    const out = await db.withTenant(esc, (c) => repos.listarSkus(c, lote.id));
+    expect(out.map((s) => s.status)).toEqual(["NA_FILA", "NA_FILA"]);
+  });
+
+  it("never reopens a concluded lote", async () => {
+    const lote = await db.withTenant(esc, (c) => repos.criarLote(c, { cliente: "Assinado", dataReferencia: "2026-11-18", skus: skus.slice(0, 1) }));
+    const u = await db.buscarUsuarioPorEmail("w@e.com");
+    await db.withTenant(esc, async (c) => { await repos.atualizarLote(c, lote.id, { status: "EM_REVISAO" }); await repos.concluirLote(c, lote.id, u!.id); });
+    await expect(processarLote(db, lote.id, { backend: new FakeBackend(), engine: fakeEngine({ down: false }), cenario })).rejects.toBeInstanceOf(ConcessaoPerdidaError);
+    expect((await db.withTenant(esc, (c) => repos.obterLote(c, lote.id)))!.status).toBe("CONCLUIDO");
   });
 });
