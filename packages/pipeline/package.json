@@ -1,0 +1,14 @@
+{
+  "name": "@tributon/pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "test": "vitest run" },
+  "dependencies": {
+    "@tributon/classifier": "workspace:*",
+    "@tributon/tax-pack": "workspace:*",
+    "papaparse": "^5.4.1"
+  },
+  "devDependencies": { "@types/papaparse": "^5.3.15" }
+}

@@ -1,0 +1,12 @@
+/* Ajustes do Tributon sobre a Ledger (sem editar ledger.css, que é o asset da skill). */
+
+/* Chips de URL longos: o caminho precisa poder encolher para o "…" funcionar dentro de grids e colunas. */
+.url { min-width: 0; }
+.url__host { flex: none; }
+.url__path { min-width: 0; flex: 1 1 auto; }
+.coluna-chips { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.coluna-chips > a { min-width: 0; }
+.pillar { min-width: 0; }
+
+/* Roller do hero: a palavra que entra cobre a anterior durante o wipe (sem fundo, as duas apareciam sobrepostas). */
+.roll__w { background: var(--paper); }
